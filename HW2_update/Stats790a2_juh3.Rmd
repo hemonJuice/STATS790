@@ -1,0 +1,356 @@
+---
+title: "STATS790 A2"
+author: "Hanwen Ju"
+date: '2023-02-12'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Question 1(b)
+```{r}
+#Naive Linear Algebra
+
+beta.la <- function(X,y){
+  beta <- solve(t(X) %*% X) %*%t(X) %*% y
+  
+  return(beta)
+}
+
+
+#QR decomposition
+
+beta.qr <- function(X,y){
+  QR <- qr(X)
+  Q <- qr.Q(QR)
+  R <- qr.R(QR)
+  
+  beta <- solve(R) %*% t(Q) %*% y
+  
+  return(beta)
+}
+
+
+#SVD decomposition
+
+beta.svd <- function(X,y){
+  svd <- svd(X)
+  u <- svd$u
+  d <- diag(svd$d)
+  v <- svd$v
+  
+  beta <- v %*% solve(d) %*% t(u) %*% y
+  
+  return(beta)
+  
+}
+
+
+
+
+
+
+
+```
+
+
+```{r}
+library(microbenchmark)
+#my_lm <- function(X,y) rnorm(ncol(X)) ## trivial: for testing
+simfun <- function(n, p) {
+    y <- rnorm(n)
+    X <- matrix(rnorm(p*n), ncol = p)
+    X <- as.matrix(cbind(rep(1,n),X))
+    list(X = X, y = y)
+}
+set.seed(101)
+s <- simfun(100, 10)
+
+
+beta.qr(s$X, s$y)
+beta.la(s$X, s$y)
+beta.svd(s$X, s$y)
+
+```
+
+
+```{r}
+nvec <- round(10^seq(2, 5, by = 0.25))
+
+#store the result:
+
+ren.la <- c()
+ren.qr <- c()
+ren.svd <- c()
+
+#looping over values of n
+for (i in 1:length(nvec)) {
+
+    s <- simfun(nvec[i], p = 10)
+    m <- microbenchmark(
+        beta.la(s$X, s$y),
+        beta.qr(s$X, s$y),
+        beta.svd(s$X, s$y))
+    re <- summary(m, unit ='ms')
+    ren.la <- append(ren.la, re$mean[1])
+    ren.qr <- append(ren.qr, re$mean[2])
+    ren.svd <- append(ren.svd, re$mean[3])
+
+}
+
+ren.df <- data.frame(Naive = ren.la, QR = ren.qr, SVD = ren.svd)
+
+
+
+
+
+#pvec <- round(10^seq(1, 2, by = 0.25))
+
+pvec <- c(5,25,50,100,200,400)
+rep.la <- c()
+rep.qr <- c()
+rep.svd <- c()
+
+
+#looping over values of p
+
+
+for (i in 1:length(pvec)) {
+    s <- simfun(500, p = pvec[i])
+    m <- microbenchmark(
+        beta.la(s$X, s$y),
+        beta.qr(s$X, s$y),
+        beta.svd(s$X, s$y))
+    re <- summary(m,unit = 'ms')
+    rep.la <- c(rep.la, re$mean[1])
+    rep.qr <- c(rep.qr, re$mean[2])
+    rep.svd <- c(rep.svd, re$mean[3])
+}
+
+rep.df <- data.frame(Naive = rep.la, QR = rep.qr, SVD = rep.svd)
+
+
+```
+
+```{r}
+
+
+library(ggplot2)
+
+#plot Running time for different n with p=10
+(ggplot()
+  + geom_line(aes(x= nvec,y = ren.la,colour = "red"))
+  + geom_line(aes(x= nvec,y = ren.qr,colour = "blue")) 
+  + geom_line(aes(x= nvec,y = ren.svd,colour = "green"))
+  + scale_color_manual(labels = c("SVD", "QR","Naive"), values = c("red", "blue","green"))
+  + scale_x_continuous(trans='log10') 
+  + scale_y_continuous(trans='log10')
+  + ggtitle("Running time for different n with p=10") 
+  + ylab("Running time")  
+  + theme_bw())
+       
+
+  
+#plot Running time for different n with p=10
+(ggplot()
+
+  + geom_line(aes(x= pvec,y = rep.svd,colour = "green"))
+    + geom_line(aes(x= pvec,y = rep.la,colour = "red"))
+
+  + geom_line(aes(x= pvec,y = rep.qr,colour = "blue")) 
+
+  + scale_color_manual(labels = c("SVD", "QR","Naive"), values = c("red", "blue","green"))
+  + scale_x_continuous(trans='log10') 
+  + scale_y_continuous(trans='log10')
+  + ggtitle("Running time for different p with n=500") 
+  + ylab("Running time")  
+  + theme_bw())
+
+
+
+
+
+
+```
+
+
+
+
+```{r}
+#fit linear model for n time
+
+#Naive linear algebra
+naive.n.lm <- lm(
+  log(ren.la)~ log(nvec)
+)
+naive.n.lm
+
+#QR
+qr.n.lm <- lm(
+  log(ren.qr)~ log(nvec)
+)
+qr.n.lm
+
+
+#SVD
+svd.n.lm <- lm(
+  log(ren.svd)~ log(nvec)
+)
+svd.n.lm
+
+
+```
+
+```{r}
+#fit linear model for p predictor
+
+#Naive linear algebra
+naive.p.lm <- lm(
+  log(rep.la)~ log(pvec)
+)
+naive.p.lm
+
+#QR
+qr.p.lm <- lm(
+  log(rep.qr)~ log(pvec)
+)
+qr.p.lm
+
+
+#SVD
+svd.p.lm <- lm(
+  log(rep.svd)~ log(pvec)
+)
+svd.p.lm
+```
+
+
+
+\newpage
+
+
+## Question 2
+
+```{r}
+
+#Ridge regression by data augmentation(QR decompsition)
+
+lmridge <- function(X,y,lambda){
+  
+  X <- unname(X)
+  n <- dim(X)[1]
+  p <- dim(X)[2]
+  
+  #augmenting X
+  B <- as.matrix(rbind(as.matrix(X),sqrt(lambda)*diag(p)))
+  
+  B <- as.matrix(cbind(c(rep(1,n),rep(0,p)),B))
+  
+  #augmentin y
+  
+  y <- as.matrix(c(y,rep(0,p)))
+  
+  
+  #QR decomposition
+  QR <- qr(B)
+  Q <- qr.Q(QR)
+  R <- qr.R(QR)
+  
+  
+  beta <- solve(R) %*% t(Q) %*% as.matrix(y)
+ 
+  
+  
+  return(beta)
+}
+
+# read data
+df <- read.table("https://hastie.su.domains/ElemStatLearn/datasets/prostate.data")
+head(df)
+
+
+
+train <- df[df$train==TRUE,]
+train <- scale(train,TRUE,TRUE)
+train_x <- train[,1:8]
+train_y <- train[,9]
+
+test <- df[df$train==FALSE,]
+test <- scale(test,TRUE,TRUE)
+test_x <- test[,1:8]
+test_y <- test[,9]
+
+
+
+```
+
+```{r}
+#ridge regression by data augmenting(QR)
+
+beta.ridge <- lmridge(train_x,train_y,2)
+
+pred.ridge <- as.matrix(cbind(rep(1,nrow(test_x)),test_x)) %*% beta.ridge
+
+#RSS error
+sum((test_y - pred.ridge)^2)
+
+
+
+
+#ridge regression by glmnet
+fit <- glmnet::glmnet(
+  x = train_x,
+  y = train_y,
+  family = "gaussian",
+  alpha = 0,  ## ridge penalty
+  lambda = 2,
+  standardize = FALSE,
+)
+
+fit_pred <- predict(
+  fit,
+  s = 2,
+  newx = test_x
+)
+
+#RSS Error
+sum((test_y - fit_pred)^2)
+
+
+
+
+
+
+m1 <- microbenchmark(
+    lmridge(train_x,train_y,2),
+    fit <- glmnet::glmnet(
+    x = train_x,
+    y = train_y,
+    family = "gaussian",
+    alpha = 0,  ## ridge penalty
+    lambda = 2,
+    standardize = FALSE,
+    intercept = FALSE,
+    )
+    )
+
+results <- summary(m1)
+
+#time comparsion
+rownames(results) <- c("lmridge", "glmnet")
+results[,-1]
+```
+
+
+
+
+
+
+
+
+
+
+
