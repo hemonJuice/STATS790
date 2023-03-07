@@ -1,0 +1,384 @@
+---
+title: "Stats790 A3"
+author: "Hanwen Ju"
+date: '2023-03-05'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Question 1
+
+```{r}
+
+#ESL figure 5.3
+library(splines)
+
+x <- runif(50)
+
+#Pointwise variance
+
+pvar <- function(X) {diag(X%*%solve(t(X)%*%X)%*%t(X))}
+
+
+#linear
+bs_linear <- bs(x, degree = 1, df=2, intercept = TRUE)  
+var_linear <- pvar(bs_linear)
+
+#cubic polynomial
+bs_cubic <- bs(x, degree = 3, df=4, intercept = TRUE)
+var_cubic <- pvar(bs_cubic)
+
+#2 knots cubic
+bs_cubic2 <- bs(x, degree = 3, df=6, intercept = TRUE, knots = c(0.33, 0.66))
+var_cubic2 <- pvar(bs_cubic2)
+
+#6 knots natural
+knots <- seq(0.1, 0.9, length.out = 6)[2:5]
+bs_ns <- bs(x, degree = 3, intercept = TRUE, Boundary.knots = c(0.1,0.9), knots = knots)
+var_ns <- pvar(bs_ns)
+
+
+
+plot(x, var_cubic, ylim = c(0,0.6),cex = 0.5, pch = 16, col = 'red',
+     ylab = 'Pointwise Variances', xlab = 'X')
+lines(x[order(x)], var_cubic[order(x)], col = "red")
+points(x, var_linear, col='orange', cex = 0.5,pch = 16)
+lines(x[order(x)], var_linear[order(x)], col = "orange")
+points(x, var_cubic2, col = 'green', cex = 0.5,pch = 16)
+lines(x[order(x)], var_cubic2[order(x)], col = "green")
+points(x, var_ns, col = 'blue',cex = 0.5, pch = 16)
+lines(x[order(x)], var_ns[order(x)], col = "blue")
+legend(x=0.25,y= 0.6,legend = c('Global Linear', 'Global Cubic Polynomial', 'Global Spline - 2 knots', 'Natural Cubic Spline - 6 knots'), col = c('orange', 'red', 'green', 'blue'), lty = 1)
+
+```
+
+
+
+## Question 2
+
+```{r}
+library(foreign)
+url <- "http://www-stat.stanford.edu/~tibs/ElemStatLearn/datasets/SAheart.data"
+dd <- read.csv(url, row.names = 1)
+
+exclude_vars <- c("chd", "famhist")
+numvars <- setdiff(names(dd), exclude_vars)
+library(splines)
+library(nnet)
+
+#train/test set
+train_sa <- dd[1:325, ]
+test_sa <- dd[325:462, ]
+
+train_tob <- train_sa$tobacco
+test_tob <- test_sa$tobacco
+
+
+```
+
+
+
+
+```{r}
+#natural cubic spline#####################################################################
+
+
+#full_model, using all features:
+spline_terms_ns <- sprintf("ns(%s, df = 6)", numvars)
+ff_ns <- reformulate(c("famhist", spline_terms_ns), response = "chd")
+full_model_ns <- glm(ff_ns, family = binomial, data = dd)
+#reduced_model <- MASS::stepAIC(full_model_ns, direction = "backward")
+#as.formula(model.frame(reduced_model))
+
+#tobacco
+knots_ns <- seq(min(train_tob), max(train_tob), length = 7)[2:6]
+tob_ns <- ns(train_tob,df=6,knots = knots_ns)
+#attributes(tob_ns)[c("degree", "knots", "Boundary.knots")]
+
+
+
+#logistic regression
+tob_model_ns <- multinom(train_sa$chd~tob_ns)#glm(train_sa$chd ~ tob_ns, family = binomial)
+tob_ns_coe <- coef(tob_model_ns)
+
+
+
+
+#predict train
+pred.ns <- as.matrix(cbind(rep(1,nrow(train_sa)),tob_ns)) %*% tob_ns_coe
+
+pred.ns.logi <- exp(pred.ns)/(1+exp(pred.ns))
+pred.ns.logi01 <- ifelse(pred.ns.logi > 0.5, 1, 0)
+table(pred.ns.logi01,train_sa$chd)
+
+
+vv=order(train_tob)
+plot(sort(train_tob),pred.ns[vv],type='l',pch=19,xlab='tobacco',ylab='f(tobacco)')
+
+#predict test
+test_tob_ns <- ns(test_tob, df = 6)
+pred.ns.test <- as.matrix(cbind(rep(1,nrow(test_sa)),test_tob_ns)) %*% tob_ns_coe
+
+pred.ns.logi.test <- exp(pred.ns.test)/(1+exp(pred.ns.test))
+pred.ns.logi01.test <- ifelse(pred.ns.logi.test > 0.5, 1, 0)
+table(pred.ns.logi01.test,test_sa$chd)
+
+
+
+
+vv=order(test_tob)
+plot(sort(test_tob),pred.ns.test[vv],type='l',pch=19,xlab='tobacco',ylab='f(tobacco)')
+```
+
+
+```{r}
+#b-spline##################################################################################
+
+#full_model, using all features:
+spline_terms_bs <- sprintf("bs(%s, df = 6)", numvars)
+ff_bs <- reformulate(c("famhist", spline_terms_bs), response = "chd")
+full_model_bs <- glm(ff_bs, family = binomial, data = dd)
+#reduced_model <- MASS::stepAIC(full_model_ns, direction = "backward")
+#as.formula(model.frame(reduced_model))
+
+#tobacco
+tob_bs <- bs(train_tob, df = 8)
+attributes(tob_bs)[c("degree", "knots", "Boundary.knots")]
+
+
+#logistic regression
+tob_model_bs <- multinom(train_sa$chd~tob_bs)
+tob_bs_coe <- coef(tob_model_bs)
+
+
+
+
+#predict train
+pred.bs <- as.matrix(cbind(rep(1,nrow(train_sa)),tob_bs)) %*% tob_bs_coe
+
+pred.bs.logi <- exp(pred.bs)/(1+exp(pred.bs))
+pred.bs.logi01 <- ifelse(pred.bs.logi > 0.5, 1, 0)
+table(pred.bs.logi01,train_sa$chd)
+
+
+vv=order(train_tob)
+plot(sort(train_tob),pred.bs[vv],type='l',pch=19,xlab='tobacco',ylab='f(tobacco)')
+
+#predict test
+test_tob_bs <- bs(test_tob, df = 8)
+pred.bs.test <- as.matrix(cbind(rep(1,nrow(test_sa)),test_tob_bs)) %*% tob_bs_coe
+
+pred.bs.logi.test <- exp(pred.bs.test)/(1+exp(pred.bs.test))
+pred.bs.logi01.test <- ifelse(pred.bs.logi.test > 0.5, 1, 0)
+table(pred.bs.logi01.test,test_sa$chd)
+
+
+
+
+vv=order(test_tob)
+plot(sort(test_tob),pred.bs.test[vv],type='l',pch=19,xlab='tobacco',ylab='f(tobacco)')
+
+
+
+```
+
+
+```{r}
+#truncated polynomial spline##################################################################################
+
+truncpolyspline <- function(x, df) {
+if (!require("Matrix")) stop("need Matrix package")
+knots <- quantile(x, seq(0, 1, length = df - 1))
+## should probably use seq() instead of `:`
+## dim: n x (df-2)
+trunc_fun <- function(k) (x>=k)*(x-k)^3
+S <- sapply(knots[1:(df-2)], trunc_fun)
+#S <- as(S, "CsparseMatrix")
+## dim: n x df
+S <- cbind(x, x^2, S)
+return(S)
+}
+
+
+#tobacco
+tob_tps <- truncpolyspline(train_tob, df = 7)
+
+
+
+
+#logistic regression
+tob_model_tps <- multinom(train_sa$chd~tob_tps)
+tob_tps_coe <- coef(tob_model_tps)
+
+
+
+
+#predict train
+pred.tps <- as.matrix(cbind(rep(1,nrow(train_sa)),tob_tps)) %*% tob_tps_coe
+
+pred.tps.logi <- exp(pred.tps)/(1+exp(pred.tps))
+pred.tps.logi01 <- ifelse(pred.tps.logi > 0.5, 1, 0)
+table(pred.tps.logi01,train_sa$chd)
+
+
+vv=order(train_tob)
+plot(sort(train_tob),pred.tps[vv],type='l',pch=19,xlab='tobacco',ylab='f(tobacco)')
+
+#predict test
+test_tob_tps <- truncpolyspline(test_tob, df = 7)
+pred.tps.test <- as.matrix(cbind(rep(1,nrow(test_sa)),test_tob_tps)) %*% tob_tps_coe
+
+pred.tps.logi.test <- exp(pred.tps.test)/(1+exp(pred.tps.test))
+pred.tps.logi01.test <- ifelse(pred.tps.logi.test > 0.5, 1, 0)
+table(pred.tps.logi01.test,test_sa$chd)
+
+
+
+
+vv=order(test_tob)
+plot(sort(test_tob),pred.tps.test[vv],type='l',pch=19,xlab='tobacco',ylab='f(tobacco)')
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Question 3
+
+```{r}
+library(Matrix)
+truncpolyspline <- function(x, df,natrual) {
+  if (!require("Matrix")) stop("need Matrix package")
+  
+# if natural cubic spline
+if (natrual == TRUE){
+  
+  knots <- quantile(x, seq(0, 1, length = df+3))
+  trunc_fun <- function(k) (x>=k)*(x-k)^3
+  
+  numberKnots <- df+2
+  
+  xiK <- knots[df+2] #last region
+  
+  SN <- x
+  
+  
+  end <- df - 1
+  for (i in 1:end){
+    #print(j)
+    dk <- (trunc_fun(knots[i+1])-trunc_fun(xiK))/(xiK-knots[i+1])
+    dKm1 <- (trunc_fun(knots[df+1])-trunc_fun(xiK))/(xiK-knots[df+1])   #K-1
+    SN <- cbind(SN,dk-dKm1)
+  }
+  return(SN)
+  
+}else{# cubic spline
+  
+  ## should probably use seq() instead of `:`
+  ## dim: n x (df-2)
+  
+  knots <- quantile(x, seq(0, 1, length = df - 1))
+  trunc_fun <- function(k) (x>=k)*(x-k)^3
+  
+  S <- sapply(knots[1:(df-2)], trunc_fun)
+  S <- as(S, "CsparseMatrix")
+  ## dim: n x df
+  S <- cbind(x, x^2, S)
+  return(S)
+}
+
+}
+
+
+
+
+xvec <- seq(0, 1, length = 101)
+
+ts.ns <- truncpolyspline(xvec, df = 7,natrual = TRUE)
+ts <- truncpolyspline(xvec, df = 7,natrual = FALSE)
+
+matplot(scale(ts.ns), type = "l")
+matplot(scale(ts), type = "l")
+```
+
+
+## Question 4
+
+```{r}
+
+
+rbinorm.gibbs <- function(N, mu1, mu2, s1, s2, rho, burnin=0) {
+  # Function to generate bivariate normals by Gibbs sampling algorithm(From Stats4CI3)
+  
+  # Arguments:
+  # N - the required length of the chain
+  # mu1, mu2 - the marginal means
+  # s1, s2 - the marginal standard deviations
+  # rho - the correlation between the components
+  # burnin - the number of burn-in iterations
+
+  x0 <- rnorm(2, c(mu1, mu2), c(s1,s2))
+  # calculate the conditional standard deviations
+  s1c <- s1*sqrt(1-rho^2)
+  s2c <- s2*sqrt(1-rho^2)
+  X <- matrix(NA, nrow=N+1+burnin, ncol=2)
+  X[1,] <- x0
+  for (i in 1:(N+burnin)) {
+    X[i+1,1] <- rnorm(1, mu1+rho*s1/s2*(X[i,2]-mu2), s1c)
+    X[i+1,2] <- rnorm(1, mu2+rho*s2/s1*(X[i+1,1]-mu1), s2c)
+  }
+  X[-(1:(burnin+1)),]
+}
+
+X.gibbs <- rbinorm.gibbs(2500, -1, 1, 1, 2, -0.5, 2000)
+
+plot(X.gibbs)
+
+
+
+```
+
+
+
+
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
