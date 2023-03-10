@@ -1,0 +1,433 @@
+---
+title: "Stats790 A3"
+author: "Hanwen Ju"
+date: '2023-03-05'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Question 1
+
+```{r}
+
+#ESL figure 5.3
+library(splines)
+
+x <- runif(50)
+
+#Pointwise variance
+
+pvar <- function(X) {diag(X%*%solve(t(X)%*%X)%*%t(X))}
+
+
+#linear
+bs_linear <- bs(x, degree = 1, df=2, intercept = TRUE)  
+var_linear <- pvar(bs_linear)
+
+#cubic polynomial
+bs_cubic <- bs(x, degree = 3, df=4, intercept = TRUE)
+var_cubic <- pvar(bs_cubic)
+
+#2 knots cubic
+bs_cubic2 <- bs(x, degree = 3, df=6, intercept = TRUE, knots = c(0.33, 0.66))
+var_cubic2 <- pvar(bs_cubic2)
+
+#6 knots natural
+knots <- seq(0.1, 0.9, length.out = 6)[2:5]
+bs_ns <- bs(x, degree = 3, intercept = TRUE, Boundary.knots = c(0.1,0.9), knots = knots)
+var_ns <- pvar(bs_ns)
+
+
+
+plot(x, var_cubic, ylim = c(0,0.6),cex = 0.5, pch = 16, col = 'red',
+     ylab = 'Pointwise Variances', xlab = 'X')
+lines(x[order(x)], var_cubic[order(x)], col = "red")
+points(x, var_linear, col='orange', cex = 0.5,pch = 16)
+lines(x[order(x)], var_linear[order(x)], col = "orange")
+points(x, var_cubic2, col = 'green', cex = 0.5,pch = 16)
+lines(x[order(x)], var_cubic2[order(x)], col = "green")
+points(x, var_ns, col = 'blue',cex = 0.5, pch = 16)
+lines(x[order(x)], var_ns[order(x)], col = "blue")
+legend(x=0.25,y= 0.6,legend = c('Global Linear', 'Global Cubic Polynomial', 'Global Spline - 2 knots', 'Natural Cubic Spline - 6 knots'), col = c('orange', 'red', 'green', 'blue'), lty = 1)
+
+```
+
+
+
+## Question 2
+
+```{r}
+library(foreign)
+url <- "http://www-stat.stanford.edu/~tibs/ElemStatLearn/datasets/SAheart.data"
+dd <- read.csv(url, row.names = 1)
+
+exclude_vars <- c("chd", "famhist")
+numvars <- setdiff(names(dd), exclude_vars)
+library(splines)
+library(nnet)
+
+#train/test set
+
+
+train_sa <- dd[1:380,]
+train_tob <- as.data.frame(train_sa$tobacco)
+train_tob_res <- train_sa$chd
+
+
+test_sa <- dd[380:462,]
+test_tob <- as.data.frame(test_sa$tobacco)
+test_tob_res <- test_sa$chd
+
+```
+
+
+
+
+```{r}
+#natural cubic spline#####################################################################
+
+
+#full_model, using all features:
+spline_terms_ns <- sprintf("ns(%s, df = 6)", numvars)
+ff_ns <- reformulate(c("famhist", spline_terms_ns), response = "chd")
+full_model_ns <- glm(ff_ns, family = binomial, data = dd)
+
+
+#tobacco
+knots_ns <- seq(min(train_tob), max(train_tob), length = 7)[2:6]
+tob_ns <- ns(train_sa$tobacco,knots = knots_ns)
+
+
+#logistic regression
+tob_model_ns <- glm(chd ~ ns(tobacco,knots = knots_ns), data = train_sa, family = binomial)
+tob_ns_coe <- tob_model_ns$coefficients
+
+
+
+
+#predict train
+pred.ns.train <- as.matrix(cbind(rep(1,nrow(train_tob)),tob_ns)) %*% tob_ns_coe
+pred.ns.train <- exp(pred.ns.train) / (1 + exp(pred.ns.train))
+
+pred.ns.train<-ifelse(pred.ns.train>=0.5,1,0)
+
+table(pred.ns.train,train_tob_res)
+#accuracy
+sum(diag(table(pred.ns.train,train_tob_res)))/sum(table(pred.ns.train,train_tob_res))
+
+
+
+#predict test
+knots_ns.test <- seq(min(test_tob), max(test_tob), length = 7)[2:6]
+tob_ns.test <- ns(test_sa$tobacco,knots = knots_ns.test)
+pred.ns.test <- as.matrix(cbind(rep(1,nrow(test_tob)),tob_ns.test)) %*% tob_ns_coe
+pred.ns.test <- exp(pred.ns.test) / (1 + exp(pred.ns.test))
+
+pred.ns.test<-ifelse(pred.ns.test>=0.5,1,0)
+
+table(pred.ns.test,test_tob_res)
+
+#accuracy
+sum(diag(table(pred.ns.test,test_tob_res)))/sum(table(pred.ns.test,test_tob_res))
+
+```
+
+
+```{r}
+#b-spline##################################################################################
+
+#full_model, using all features:
+spline_terms_bs <- sprintf("bs(%s, df = 6)", numvars)
+ff_bs <- reformulate(c("famhist", spline_terms_bs), response = "chd")
+full_model_bs <- glm(ff_bs, family = binomial, data = dd)
+#reduced_model <- MASS::stepAIC(full_model_ns, direction = "backward")
+#as.formula(model.frame(reduced_model))
+
+#tobacco
+knots_bs <- seq(min(train_tob), max(train_tob), length = 7)[2:6]
+tob_bs <- bs(train_sa$tobacco,knots = knots_bs)
+
+
+#logistic regression
+tob_model_bs <- glm(chd ~ bs(tobacco,knots = knots_bs), data = train_sa, family = binomial)
+tob_bs_coe <- tob_model_bs$coefficients
+
+
+
+
+#predict train
+pred.bs.train <- as.matrix(cbind(rep(1,nrow(train_tob)),tob_bs)) %*% tob_bs_coe
+pred.bs.train <- exp(pred.bs.train) / (1 + exp(pred.bs.train))
+
+pred.bs.train<-ifelse(pred.bs.train>=0.5,1,0)
+
+table(pred.bs.train,train_tob_res)
+#accuracy
+sum(diag(table(pred.bs.train,train_tob_res)))/sum(table(pred.bs.train,train_tob_res))
+
+
+
+#predict test
+knots_bs.test <- seq(min(test_tob), max(test_tob), length = 7)[2:6]
+tob_bs.test <- bs(test_sa$tobacco,knots = knots_bs.test)
+pred.bs.test <- as.matrix(cbind(rep(1,nrow(test_tob)),tob_bs.test)) %*% tob_bs_coe
+pred.bs.test <- exp(pred.bs.test) / (1 + exp(pred.bs.test))
+
+pred.bs.test<-ifelse(pred.bs.test>=0.5,1,0)
+
+table(pred.bs.test,test_tob_res)
+
+#accuracy
+sum(diag(table(pred.bs.test,test_tob_res)))/sum(table(pred.bs.test,test_tob_res))
+
+
+```
+
+
+```{r}
+#truncated polynomial spline##################################################################################
+
+truncpolyspline <- function(x, df) {
+if (!require("Matrix")) stop("need Matrix package")
+knots <- quantile(x, seq(0, 1, length = df - 1))
+## should probably use seq() instead of `:`
+## dim: n x (df-2)
+trunc_fun <- function(k) (x>=k)*(x-k)^3
+S <- sapply(knots[2:(df-2)], trunc_fun)
+#S <- as(S, "CsparseMatrix")
+## dim: n x df
+S <- cbind(x, x^2, S)
+return(S)
+}
+
+
+#tobacco
+tob_tps <- truncpolyspline(train_sa$tobacco, df = 8)
+
+
+
+
+#logistic regression
+tob_model_tps <- glm(chd ~ truncpolyspline(tobacco, df = 8), data = train_sa, family = binomial)
+tob_tps_coe <- tob_model_tps$coefficients
+
+
+
+
+#predict train
+pred.tps.train <- as.matrix(cbind(rep(1,nrow(train_tob)),tob_tps)) %*% tob_tps_coe
+pred.tps.train <- exp(pred.tps.train) / (1 + exp(pred.tps.train))
+
+pred.tps.train<-ifelse(pred.tps.train>=0.5,1,0)
+
+table(pred.tps.train,train_tob_res)
+#accuracy
+sum(diag(table(pred.tps.train,train_tob_res)))/sum(table(pred.tps.train,train_tob_res))
+
+
+
+#predict test
+tob_tps.test <- truncpolyspline(test_sa$tobacco, df = 8)
+pred.tps.test <- as.matrix(cbind(rep(1,nrow(test_tob)),tob_tps.test)) %*% tob_tps_coe
+pred.tps.test <- exp(pred.tps.test) / (1 + exp(pred.tps.test))
+
+pred.tps.test<-ifelse(pred.tps.test>=0.5,1,0)
+
+table(pred.tps.test,test_tob_res)
+
+#accuracy
+sum(diag(table(pred.tps.test,test_tob_res)))/sum(table(pred.tps.test,test_tob_res))
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Question 3
+
+```{r}
+library(Matrix)
+truncpolyspline <- function(x, df,natrual) {
+  if (!require("Matrix")) stop("need Matrix package")
+  
+# if natural cubic spline
+if (natrual == TRUE){
+  
+  knots <- quantile(x, seq(0, 1, length = df+3))
+  trunc_fun <- function(k) (x>=k)*(x-k)^3
+  
+  numberKnots <- df+2
+  
+  xiK <- knots[df+2] #last region
+  
+  SN <- x
+  
+  
+  end <- df - 1
+  for (i in 1:end){
+    #print(j)
+    dk <- (trunc_fun(knots[i+1])-trunc_fun(xiK))/(xiK-knots[i+1])
+    dKm1 <- (trunc_fun(knots[df+1])-trunc_fun(xiK))/(xiK-knots[df+1])   #K-1
+    SN <- cbind(SN,dk-dKm1)
+  }
+  return(SN)
+  
+}else{# cubic spline
+  
+  ## should probably use seq() instead of `:`
+  ## dim: n x (df-2)
+  
+  knots <- quantile(x, seq(0, 1, length = df - 1))
+  trunc_fun <- function(k) (x>=k)*(x-k)^3
+  
+  S <- sapply(knots[1:(df-2)], trunc_fun)
+  S <- as(S, "CsparseMatrix")
+  ## dim: n x df
+  S <- cbind(x, x^2, S)
+  return(S)
+}
+
+}
+
+
+
+
+xvec <- seq(0, 1, length = 101)
+
+ts.ns <- truncpolyspline(xvec, df = 7,natrual = TRUE)
+ts <- truncpolyspline(xvec, df = 7,natrual = FALSE)
+
+matplot(scale(ts.ns), type = "l")
+matplot(scale(ts), type = "l")
+```
+
+
+## Question 4
+
+
+```{r}
+library(emdbook)
+library("scatterplot3d")
+
+#3-oder bivariate polynomial
+curve3d( 2 + 3*x + 4*y + 5*x^2 + 6*x*y + 7*y^2 + 8*x^3 + 9*x^2*y + 10*x*y^2 + 11*y^3 + 12*exp(-((x-1)^2 + (y-1)^2)/0.1) + 13*exp(-((x+1)^2 + (y+1)^2)/0.1)  )
+
+
+bivPoly3 <- function(x,y, sd){
+  z <- 2 + 3*x + 4*y + 5*x^2 + 6*x*y + 7*y^2 + 8*x^3 + 9*x^2*y + 10*x*y^2 + 11*y^3 + 12*exp(-((x-1)^2 + (y-1)^2)/0.1) + 13*exp(-((x+1)^2 + (y+1)^2)/0.1)
+  
+  # add gaussian noise to it
+  z <- z + rnorm(length(x), mean = 0, sd = sd)
+}
+
+
+# create 250 data points:
+
+x <- runif(250,0,10)
+y <- runif(250,0,10)
+
+z <- bivPoly3(x,y,0.4)
+
+scatterplot3d(x, y,z)
+
+```
+
+
+```{r}
+
+library(mgcv)
+
+
+xy <- data.frame(x,y)
+
+
+#model using generalized cross-validation
+
+m1 <- gam(z ~ te(x,y,bs = "gp"),data = xy, method="GCV.Cp")
+summary(m1)
+p1 <- predict(m1, newdata = xy)
+
+#MSE
+mean((z - p1)^2)
+
+#Bias
+sum(abs(mean(p1) - z))
+
+#variance
+mean((p1 - mean(p1)) ^ 2)
+
+
+
+
+#model using restricted maximum likelihood
+
+m2 <- gam(z ~ te(x,y,bs = "gp"),data = xy, method = "REML")
+summary(m2)
+p2 <- predict(m2, newdata = xy)
+
+
+
+#MSE
+sum((z - p2)^2)
+
+#Bias
+sum(abs(mean(p2) - z))
+
+#variance
+mean((p2 - mean(p2)) ^ 2)
+
+
+
+
+
+# Time
+
+library(microbenchmark)
+m1 <- microbenchmark(
+    gam(z ~ te(x,y,bs = "gp"),data = xy, method="GCV.Cp"),
+    gam(z ~ te(x,y,bs = "gp"),data = xy, method = "REML")
+    )
+results <- summary(m1)
+#time comparsion
+rownames(results) <- c("generalized cross-validation", "restricted maximum likelihood")
+results[,-1]
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
